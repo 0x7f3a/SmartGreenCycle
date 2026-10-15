@@ -73,6 +73,7 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <DHT.h>
+#include "driver/gpio.h"
 #include "webpage.h"
 
 // ==========================================================
@@ -93,10 +94,15 @@ const int BTN_PIN[4]   = {16, 17, 4, 27};
 enum { R_DRIP = 0, R_MIST = 1, R_CLEAN = 2, R_FILTER = 3 };
 const char* RELAY_NAME[4] = {"Drip", "Mist", "Clean", "Filter"};
 
-// ---- ប្រភេទ Relay ----
-// false = Active-HIGH (HIGH=ON)។ បើ Relay ធ្វើការផ្ទុយ (App បង្ហាញ OFF តែ Relay ON)
-// សូមប្តូរទៅ true វិញ។
-const bool RELAY_ACTIVE_LOW = false;
+// ---- ប្រភេទ Relay (Polarity) ----
+// true  = Active-LOW  (LOW=ON)  : Module Relay 4-Channel ធម្មតា (មាន Optocoupler, IN1-IN4)
+// false = Active-HIGH (HIGH=ON) : Module ខ្លះ (ឧ. មាន Jumper H/L ដាក់ទៅ H)
+// បើ WebApp បង្ហាញ ON តែ Relay បិទ (ឬផ្ទុយមកវិញ) សូមប្តូរតម្លៃនេះ។
+// true  = Active-LOW  (LOW energizes the relay) - typical opto-isolated 4-ch modules.
+// false = Active-HIGH (HIGH energizes the relay). Flip this if ON/OFF is reversed.
+// ប្តូរតែកម្រិត Pin ប៉ុណ្ណោះ; relayOn[] / /status នៅតែ true = ON។
+// Only the physical pin level changes; relayOn[] and /status stay true = ON.
+const bool RELAY_ACTIVE_LOW = true;
 
 // ==========================================================
 // ២. WiFi
@@ -216,6 +222,20 @@ int relaySignal(bool on) {
   return on ? HIGH : LOW;
 }
 
+// សរសេរទៅ Pin Relay តាមរយៈ Function នេះតែមួយគត់ (អនុវត្ត RELAY_ACTIVE_LOW)
+// The only place that writes a relay pin (applies RELAY_ACTIVE_LOW).
+void writeRelay(int i, bool on) {
+  digitalWrite(RELAY_PIN[i], relaySignal(on));
+}
+
+// ដាក់កម្រិត OFF មុន pinMode(OUTPUT) ដើម្បីកុំឱ្យ Relay ឆក់បើកពេល Boot
+// Preload the OFF level before enabling the output so the relay doesn't click on at boot.
+void initRelayPin(int i) {
+  gpio_set_level((gpio_num_t)RELAY_PIN[i], relaySignal(false));
+  pinMode(RELAY_PIN[i], OUTPUT);
+  writeRelay(i, false);
+}
+
 // អាន ADC 15 ដង ហើយយកតម្លៃកណ្តាល (Median) ដើម្បីកាត់បន្ថយ Noise
 int readMedian(int pin, bool milliVolts) {
   const int N = 15;
@@ -253,10 +273,7 @@ void showMessage(const char* msg) {
 void setup() {
   Serial.begin(115200);
 
-  for (int i = 0; i < 4; i++) {
-    pinMode(RELAY_PIN[i], OUTPUT);
-    digitalWrite(RELAY_PIN[i], relaySignal(false));
-  }
+  for (int i = 0; i < 4; i++) initRelayPin(i);
 
   for (int i = 0; i < 4; i++) btns[i] = {BTN_PIN[i], HIGH, HIGH, 0};
   btns[4] = {BTN_MODE_PIN, HIGH, HIGH, 0};
@@ -401,7 +418,7 @@ void updateRelays() {
     bool on = want[i] && !blocked[i];
     if (on != relayOn[i]) {
       relayOn[i] = on;
-      digitalWrite(RELAY_PIN[i], relaySignal(on));
+      writeRelay(i, on);
       Serial.printf("Relay %d (%s) -> %s\n", i + 1, RELAY_NAME[i], on ? "ON" : "OFF");
     }
   }
@@ -610,9 +627,15 @@ void handleMode() {
 // /relay?id=1..4&state=1|0  (ដំណើរការតែក្នុង Manual)
 void handleRelay() {
   int id = server.arg("id").toInt();
-  if (!autoMode && id >= 1 && id <= 4) {
-    manualState[id - 1] = (server.arg("state") == "1");
+  if (autoMode) {
+    server.send(409, "application/json", "{\"ok\":false,\"err\":\"Mode Auto: សូមប្តូរទៅ Manual សិន\"}");
+    return;
   }
+  if (id < 1 || id > 4) {
+    server.send(400, "application/json", "{\"ok\":false,\"err\":\"Relay id ត្រូវនៅចន្លោះ 1-4\"}");
+    return;
+  }
+  manualState[id - 1] = (server.arg("state") == "1");
   updateRelays();
   server.send(200, "application/json", statusJson());
 }

@@ -323,7 +323,7 @@ footer{text-align:center;font-size:.78rem;color:var(--muted);margin-top:22px}
     if(path.indexOf('/config')===0) return cfg;
     if(path.indexOf('/save')===0){for(var k in q) cfg[k]=+q[k]; return {ok:true,cfg:cfg}}
     if(path.indexOf('/mode')===0) D.auto=q.m==='auto';
-    if(path.indexOf('/relay')===0 && !D.auto) D.r[q.id-1]=q.state==='1'?1:0;
+    if(path.indexOf('/relay')===0){if(D.auto) return {ok:false,err:'Mode Auto: សូមប្តូរទៅ Manual សិន'}; D.r[q.id-1]=q.state==='1'?1:0}
     if(path.indexOf('/reset')===0) D.fault=false;
     if(path.indexOf('/status')===0){
       var r=function(a){return (Math.random()-.5)*a};
@@ -359,6 +359,7 @@ footer{text-align:center;font-size:.78rem;color:var(--muted);margin-top:22px}
       if(S.auto){toast('សូមប្តូរទៅ Manual សិន ទើបបញ្ជាដោយដៃបាន');return}
       var on=!S.r[i];
       api('/relay?id='+(i+1)+'&state='+(on?1:0)).then(function(d){
+        if(d.ok===false){toast(d.err||'បញ្ជា Relay មិនបាន');return}
         render(d);
         if(on&&d.blk[i]) toast(r.name+' ត្រូវបានការពារ: '+r.lock);
         else toast(r.name+(on?' បានបើក':' បានបិទ'));
