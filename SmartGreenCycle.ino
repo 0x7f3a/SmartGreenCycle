@@ -33,12 +33,17 @@
    2. "DHT sensor library" by Adafruit (និង "Adafruit Unified Sensor")
    (WiFi.h, WebServer.h, Preferences.h ភ្ជាប់មកជាមួយ ESP32 core រួចហើយ)
 
+  ចំណាំ: Arduino IDE តម្រូវឱ្យឈ្មោះ Folder ដូចឈ្មោះ .ino (GreenCycle/GreenCycle.ino)
+         ហើយ webpage.h ត្រូវនៅក្នុង Folder តែមួយ។
+
   ==========================================================
   ការតភ្ជាប់ខ្សែ (Wiring):
    - LCD 16x2:      SDA -> GPIO21, SCL -> GPIO22, VCC -> 5V, GND -> GND
    - DHT11:         DATA -> GPIO23
    - Soil Sensor:   AOUT -> GPIO34
-   - pH Sensor:     Po   -> GPIO35   (!! តង់ស្យុងចេញមិនលើស 3.3V)
+   - pH Sensor:     Po -> [R1 20k] -> GPIO35 -> [R2 20k] -> GND
+                    (Voltage Divider 1:2 ព្រោះ Po អាចឡើងដល់ 5V)
+                    ដាក់ Capacitor 100nF រវាង GPIO35 និង GND
    - EC Sensor:     AOUT -> GPIO32   (!! តង់ស្យុងចេញមិនលើស 3.3V)
    - Water Level:   S    -> GPIO33
      (Sensor Analog ទាំងអស់ប្រើជើង ADC1 ព្រោះ ADC2 មិនដំណើរការពេលបើក WiFi)
@@ -100,7 +105,6 @@ const char* RELAY_NAME[4] = {"Drip", "Mist", "Clean", "Filter"};
 // បើ WebApp បង្ហាញ ON តែ Relay បិទ (ឬផ្ទុយមកវិញ) សូមប្តូរតម្លៃនេះ។
 // true  = Active-LOW  (LOW energizes the relay) - typical opto-isolated 4-ch modules.
 // false = Active-HIGH (HIGH energizes the relay). Flip this if ON/OFF is reversed.
-// ប្តូរតែកម្រិត Pin ប៉ុណ្ណោះ; relayOn[] / /status នៅតែ true = ON។
 // Only the physical pin level changes; relayOn[] and /status stay true = ON.
 const bool RELAY_ACTIVE_LOW = true;
 
@@ -118,14 +122,25 @@ const char* STA_PASSWORD = "";
 // ==========================================================
 // ៣. Calibration Sensor (ត្រូវ Calibrate ជាមួយ Sensor ពិត)
 // ==========================================================
-// pH: យកតាមកូដ hydroponic110326 -> pH = 7 - (V - PH_V_AT_7) / PH_V_PER_PH
-//  វិធី Calibrate: ដាក់ Probe ក្នុង Buffer pH 7.00 -> មើល "pH mV" លើ WebApp
-//  ដាក់តម្លៃនោះក្នុង PH_V_AT_7។ បន្ទាប់មកដាក់ក្នុង Buffer pH 4.00 ->
-//  PH_V_PER_PH = (V_pH4 - V_pH7) / 3.0
-const float PH_V_AT_7   = 1.50;   // Volt ពេល pH = 7
-const float PH_V_PER_PH = 0.18;   // Volt ប្រែប្រួលក្នុង 1 pH
+// ---- pH ----
+// Po របស់ Module ឆ្លងកាត់ Divider (R1=20k, R2=20k) មុនចូល GPIO35
+// ដូច្នេះ ESP32 ឃើញតែពាក់កណ្តាលនៃ Po។ កូដគុណ 2 វិញ ដើម្បីបានតង់ស្យុង Po ពិត។
+// ប្រសិនបើអ្នកដកចេញ Divider សូមដាក់ PH_DIVIDER = 1.0
+const float PH_DIVIDER  = 2.0;
 
-// EC: យកតាមកូដ hydroponic110326 -> EC (mS/cm) = V * EC_FACTOR
+// Po (Volt) ពេល pH = 7 -> វាស់ដោយ Short BNC (ដាក់ខ្សែទង់ដែងប៉ះទាំងចំណុចកណ្តាល និងចិញ្ចៀនក្រៅ)
+// ក្នុងការតំឡើងពិត (12V -> LM2596 -> 5V, ដកUSB)។ តម្លៃដែលបានវាស់ = 1.04 V
+// pH = 7 - (Po - PH_V_AT_7) / PH_V_PER_PH
+const float PH_V_AT_7   = 1.04;
+// Volt ប្រែប្រួលក្នុង 1 pH (PH-4502C ធម្មតា ~0.18)
+// Calibrate ពិតប្រាកដ: PH_V_PER_PH = (Po_pH4 - Po_pH7) / 3.0 (ប្រើ Buffer pH 4 និង pH 7)
+const float PH_V_PER_PH = 0.18;
+
+// ជួរ Po ដែលចាត់ទុកថា Probe/Module ដំណើរការ។ ក្រៅជួរនេះ -> "pH ERR"
+const float PH_V_MIN_OK = 0.30;
+const float PH_V_MAX_OK = 4.50;
+
+// EC: EC (mS/cm) = V * EC_FACTOR  (ត្រូវ Calibrate ជាមួយ Solution ស្គាល់តម្លៃ៖ EC_FACTOR = EC_ស្គាល់ / V)
 const float EC_FACTOR = 3.58;
 
 // Soil: តម្លៃ raw ពេលដីស្ងួតខ្លាំង (ក្នុងខ្យល់) និងពេលសើមខ្លាំង (ក្នុងទឹក)
@@ -181,9 +196,11 @@ bool  dhtOk = false;
 unsigned long lastDhtOk = 0;
 int   soilPercent = 0;
 float phValue = 7.0, ecValue = 0.0;
+float phVolt = 0;               // តង់ស្យុង Po ពិត (បន្ទាប់ពីគុណ Divider)
+bool  phProbeOk = false;        // pH Module/Probe ដំណើរការ?
+bool  phInit = false, ecInit = false;
 int   levelPercent = 0;
-int   phMv = 0, ecMv = 0, levelMv = 0;
-bool  firstRead = true;
+int   phMv = 0, ecMv = 0, levelMv = 0;   // phMv = mV ត្រង់ GPIO35 (បន្ទាប់ Divider)
 bool  waterOK = false;          // ទឹកច្រោះអាចស្រោចបាន?
 
 // ---- ស្ថានភាព Relay ----
@@ -222,13 +239,11 @@ int relaySignal(bool on) {
   return on ? HIGH : LOW;
 }
 
-// សរសេរទៅ Pin Relay តាមរយៈ Function នេះតែមួយគត់ (អនុវត្ត RELAY_ACTIVE_LOW)
 // The only place that writes a relay pin (applies RELAY_ACTIVE_LOW).
 void writeRelay(int i, bool on) {
   digitalWrite(RELAY_PIN[i], relaySignal(on));
 }
 
-// ដាក់កម្រិត OFF មុន pinMode(OUTPUT) ដើម្បីកុំឱ្យ Relay ឆក់បើកពេល Boot
 // Preload the OFF level before enabling the output so the relay doesn't click on at boot.
 void initRelayPin(int i) {
   gpio_set_level((gpio_num_t)RELAY_PIN[i], relaySignal(false));
@@ -338,25 +353,29 @@ void readSensors() {
   soilPercent = constrain(map(raw, SOIL_RAW_DRY, SOIL_RAW_WET, 0, 100), 0, 100);
 
   // ---- pH (ធុងស្តុកទឹកច្រោះ) ----
-  phMv = readMedian(PH_PIN, true);
-  float ph = 7.0f - ((phMv / 1000.0f - PH_V_AT_7) / PH_V_PER_PH);
-  ph = constrain(ph, 0.0f, 14.0f);
+  phMv   = readMedian(PH_PIN, true);                 // mV ត្រង់ GPIO35 (បន្ទាប់ Divider)
+  phVolt = (phMv / 1000.0f) * PH_DIVIDER;            // តង់ស្យុង Po ពិត (V)
+  phProbeOk = (phVolt > PH_V_MIN_OK && phVolt < PH_V_MAX_OK);
+  if (phProbeOk) {
+    float ph = 7.0f - ((phVolt - PH_V_AT_7) / PH_V_PER_PH);
+    ph = constrain(ph, 0.0f, 14.0f);
+    if (!phInit) { phValue = ph; phInit = true; }
+    else         { phValue = phValue * 0.7f + ph * 0.3f; }   // Smoothing
+  }
 
   // ---- EC (ធុងស្តុកទឹកច្រោះ) ----
   ecMv = readMedian(EC_PIN, true);
   float ec = constrain((ecMv / 1000.0f) * EC_FACTOR, 0.0f, 5.0f);
-
-  // Smoothing: ទម្លាក់ការលោតឡើងចុះភ្លាមៗ
-  if (firstRead) { phValue = ph; ecValue = ec; firstRead = false; }
-  else { phValue = phValue * 0.7f + ph * 0.3f; ecValue = ecValue * 0.7f + ec * 0.3f; }
+  if (!ecInit) { ecValue = ec; ecInit = true; }
+  else         { ecValue = ecValue * 0.7f + ec * 0.3f; }
 
   // ---- Water Level (ធុងស្រោច) ----
   levelMv = readMedian(LEVEL_PIN, true);
   levelPercent = constrain(map(levelMv, LEVEL_MV_EMPTY, LEVEL_MV_FULL, 0, 100), 0, 100);
 
   // ---- គុណភាពទឹកច្រោះ ----
-  // pH ក្រៅ 2..12 ជាធម្មតាមានន័យថា Probe មិនបានភ្ជាប់ ឬខូច -> ចាត់ទុកថាមិនល្អ
-  bool phPlausible = phValue > 2.0f && phValue < 12.0f;
+  // Probe មិនដំណើរការ ឬ pH ក្រៅ 2..12 -> ចាត់ទុកថាមិនល្អ (ប្រើទឹកស្អាតជំនួស)
+  bool phPlausible = phProbeOk && phValue > 2.0f && phValue < 12.0f;
   waterOK = phPlausible && phValue >= cfg.phMin && phValue <= cfg.phMax && ecValue <= cfg.ecMax;
 }
 
@@ -493,7 +512,8 @@ void updateDisplay() {
     else       snprintf(l0, sizeof(l0), "DHT11 error");
     snprintf(l1, sizeof(l1), "Soil:%d%%  %s", soilPercent, modeTxt);
   } else if (lcdPage == 1) {
-    snprintf(l0, sizeof(l0), "pH:%.2f EC:%.2f", phValue, ecValue);
+    if (phProbeOk) snprintf(l0, sizeof(l0), "pH:%.2f EC:%.2f", phValue, ecValue);
+    else           snprintf(l0, sizeof(l0), "pH:ERR EC:%.2f", ecValue);
     if (fillFault) snprintf(l1, sizeof(l1), "Tank:%d%% FAULT!", levelPercent);
     else           snprintf(l1, sizeof(l1), "Tank:%d%% %s", levelPercent, waterOK ? "Wtr:OK" : "Wtr:BAD");
   } else {
@@ -505,9 +525,9 @@ void updateDisplay() {
 }
 
 void logSerial() {
-  Serial.printf("T=%.1f H=%.0f Soil=%d pH=%.2f(%dmV) EC=%.2f(%dmV) Lv=%d%%(%dmV) WaterOK=%d Src=%d R=%d%d%d%d %s\n",
-                temperature, humidity, soilPercent, phValue, phMv, ecValue, ecMv,
-                levelPercent, levelMv, waterOK, fillSrc,
+  Serial.printf("T=%.1f H=%.0f Soil=%d pH=%.2f(gpio %dmV, Po %.2fV, %s) EC=%.2f(%dmV) Lv=%d%%(%dmV) WaterOK=%d Src=%d R=%d%d%d%d %s\n",
+                temperature, humidity, soilPercent, phValue, phMv, phVolt, phProbeOk ? "ok" : "ERR",
+                ecValue, ecMv, levelPercent, levelMv, waterOK, fillSrc,
                 relayOn[0], relayOn[1], relayOn[2], relayOn[3], autoMode ? "AUTO" : "MANUAL");
 }
 
@@ -588,12 +608,13 @@ String uptimeString() {
 String statusJson() {
   unsigned long up = millis() - bootMillis;
   int warm = (autoMode && up < WARMUP_MS) ? (int)((WARMUP_MS - up) / 1000) + 1 : 0;
-  char buf[512];
+  char buf[560];
   snprintf(buf, sizeof(buf),
-    "{\"t\":%.1f,\"h\":%.0f,\"dht\":%s,\"soil\":%d,\"ph\":%.2f,\"ec\":%.2f,\"lvl\":%d,"
+    "{\"t\":%.1f,\"h\":%.0f,\"dht\":%s,\"soil\":%d,\"ph\":%.2f,\"phok\":%s,\"ec\":%.2f,\"lvl\":%d,"
     "\"wq\":%s,\"src\":%d,\"auto\":%s,\"warm\":%d,\"fault\":%s,"
     "\"r\":[%d,%d,%d,%d],\"blk\":[%d,%d,%d,%d],\"mv\":[%d,%d,%d],\"up\":\"%s\"}",
-    temperature, humidity, dhtOk ? "true" : "false", soilPercent, phValue, ecValue, levelPercent,
+    temperature, humidity, dhtOk ? "true" : "false", soilPercent, phValue,
+    phProbeOk ? "true" : "false", ecValue, levelPercent,
     waterOK ? "true" : "false", (int)fillSrc, autoMode ? "true" : "false", warm, fillFault ? "true" : "false",
     relayOn[0], relayOn[1], relayOn[2], relayOn[3],
     blocked[0], blocked[1], blocked[2], blocked[3],
