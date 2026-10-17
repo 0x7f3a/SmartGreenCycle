@@ -132,17 +132,20 @@ const char* STA_PASSWORD = "";
 // No divider fitted yet -> 1.0. Set 2.0 if a 20k/20k divider is added.
 const float PH_DIVIDER  = 1.0;
 
-// Po (Volt) ពេល pH = 7 -> វាស់ដោយ Short BNC (ដាក់ខ្សែទង់ដែងប៉ះទាំងចំណុចកណ្តាល និងចិញ្ចៀនក្រៅ)
-// ក្នុងការតំឡើងពិត (12V -> LM2596 -> 5V, ដកUSB)។ តម្លៃដែលបានវាស់ = 1.04 V
+// Calibrate ជាមួយ Probe ពិត (Buffer pH 7 និង pH 4, 12V/LM2596, EC Probe ដកចេញ)
+//  Po ក្នុង Buffer pH 7.00 = 530-550 mV -> 540 mV
+//  Po ក្នុង Buffer pH 4.00 = 760-780 mV -> 770 mV
+// Calibrated with the real probe in pH 7 / pH 4 buffers (Po read from the WebApp).
 // pH = 7 - (Po - PH_V_AT_7) / PH_V_PER_PH
-const float PH_V_AT_7   = 1.04;
-// Volt ប្រែប្រួលក្នុង 1 pH (PH-4502C ធម្មតា ~0.18)
-// Calibrate ពិតប្រាកដ: PH_V_PER_PH = (Po_pH4 - Po_pH7) / 3.0 (ប្រើ Buffer pH 4 និង pH 7)
-const float PH_V_PER_PH = 0.18;
+const float PH_V_AT_7   = 0.540;   // Po ពេល pH 7
+// Volt ប្រែប្រួលក្នុង 1 pH = (Po_pH4 - Po_pH7) / 3 = (0.770 - 0.540) / 3
+// Calibrate ម្តងទៀតរៀងរាល់ 2-4 សប្តាហ៍ (Probe ចាស់ទៅ Slope ធ្លាក់)
+const float PH_V_PER_PH = 0.0767;
 
 // ជួរ Po ដែលចាត់ទុកថា Probe/Module ដំណើរការ។ ក្រៅជួរនេះ -> "pH ERR"
-// 0.30V ~ pH 11, 3.00V ~ ខាងលើ pH 0 (Module Saturate ឬ ADC ជិតពេញ)
-const float PH_V_MIN_OK = 0.30;
+// Module Saturate ខាងក្រោមនៅ ~0.24V ដូច្នេះ 0.27V (~pH 10.5) ជាកម្រិតទាប។
+// 3.00V ~ ខាងលើ pH 0 (Module Saturate ឬ ADC ជិតពេញ)
+const float PH_V_MIN_OK = 0.27;
 const float PH_V_MAX_OK = 3.00;
 
 // ---- បិទ EC ពេលអាន pH (ជម្រើស) ----
