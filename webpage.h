@@ -385,10 +385,12 @@ footer{text-align:center;font-size:.78rem;color:var(--muted);margin-top:22px}
     else if(p<80){st.textContent='សំណើមល្អ';st.style.color='var(--goodtx)';f.style.background='var(--green)'}
     else{st.textContent='ដីសើមខ្លាំង';st.style.color='var(--blue)';f.style.background='var(--blue)'}
     // pH / EC
-    $('vph').textContent=d.ph.toFixed(2); $('vec').textContent=d.ec.toFixed(2);
+    $('vec').textContent=d.ec.toFixed(2);
+    if(d.phok===false){$('vph').textContent='ERR';chip('cph','bad','Sensor pH មានបញ្ហា')}
+    else{$('vph').textContent=d.ph.toFixed(2);
     if(d.ph<cfg.phMin) chip('cph','warn','ទាប (អាស៊ីត)'); else if(d.ph>cfg.phMax) chip('cph','warn','ខ្ពស់ (បាស)'); else chip('cph','good','ល្អ');
+    hist.push(d.ph); if(hist.length>90) hist.shift(); draw();}
     d.ec>cfg.ecMax?chip('cec','warn','ប្រៃ/កខ្វក់ពេក'):chip('cec','good','ល្អ');
-    hist.push(d.ph); if(hist.length>90) hist.shift(); draw();
     // water quality
     var box=$('wqBox'); box.className='wq '+(d.wq?'good':'bad');
     $('wqT').textContent=d.wq?'ទឹកច្រោះ អាចយកមកស្រោចបាន':'ទឹកច្រោះ មិនទាន់ល្អ → ប្រើទឹកស្អាត';
@@ -416,11 +418,12 @@ footer{text-align:center;font-size:.78rem;color:var(--muted);margin-top:22px}
       stx.innerHTML=RL[i].sub+' · '+(on?'ON':'OFF')+(d.auto?' · Auto':'')+(d.blk[i]?'<br><span class="lock">🔒 '+RL[i].lock+'</span>':'');
     });
     $('rcount').textContent='បើក '+n+' / 4';
-    $('cal').textContent='Calibrate: pH '+d.mv[0]+' mV · EC '+d.mv[1]+' mV · Level '+d.mv[2]+' mV';
+    $('cal').textContent='Calibrate: pH Po '+d.mv[0]+' mV · EC '+d.mv[1]+' mV · Level '+d.mv[2]+' mV';
     // alerts
     var a='';
     if(DEMO) a+='<div class="alert info">DEMO · ទិន្នន័យក្លែងធ្វើ (បើកពី ESP32 ដើម្បីឃើញទិន្នន័យពិត)</div>';
     if(d.fault) a+='<div class="alert bad"><span>បញ្ចូលទឹកយូរពេក តែធុងស្រោចមិនឡើង។ សូមពិនិត្យ Valve ទុយោ និងប្រភពទឹក។</span><button type="button" id="rst">កំណត់ឡើងវិញ</button></div>';
+    if(d.phok===false) a+='<div class="alert bad">Sensor pH អានមិនបាន (Po '+d.mv[0]+' mV)។ ពិនិត្យខ្សែ Probe ឬដក EC Probe ចេញពីធុង។ ប្រព័ន្ធប្រើទឹកស្អាតជំនួស។</div>';
     if(d.warm>0) a+='<div class="alert warn">កំពុងរង់ចាំ Sensor pH/EC ស្ងប់ ('+d.warm+'s) មុនចាប់ផ្តើម Auto</div>';
     $('alerts').innerHTML=a;
     if($('rst')) $('rst').onclick=function(){api('/reset').then(render)};

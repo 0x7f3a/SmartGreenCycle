@@ -33,7 +33,7 @@
    2. "DHT sensor library" by Adafruit (និង "Adafruit Unified Sensor")
    (WiFi.h, WebServer.h, Preferences.h ភ្ជាប់មកជាមួយ ESP32 core រួចហើយ)
 
-  ចំណាំ: Arduino IDE តម្រូវឱ្យឈ្មោះ Folder ដូចឈ្មោះ .ino (GreenCycle/GreenCycle.ino)
+  ចំណាំ: Arduino IDE តម្រូវឱ្យឈ្មោះ Folder ដូចឈ្មោះ .ino (SmartGreenCycle/SmartGreenCycle.ino)
          ហើយ webpage.h ត្រូវនៅក្នុង Folder តែមួយ។
 
   ==========================================================
@@ -41,10 +41,13 @@
    - LCD 16x2:      SDA -> GPIO21, SCL -> GPIO22, VCC -> 5V, GND -> GND
    - DHT11:         DATA -> GPIO23
    - Soil Sensor:   AOUT -> GPIO34
-   - pH Sensor:     Po -> [R1 20k] -> GPIO35 -> [R2 20k] -> GND
-                    (Voltage Divider 1:2 ព្រោះ Po អាចឡើងដល់ 5V)
-                    ដាក់ Capacitor 100nF រវាង GPIO35 និង GND
+   - pH Sensor:     Po   -> GPIO35 ផ្ទាល់ (គ្មាន Divider -> PH_DIVIDER = 1.0)
+                    Offset ~1.04V ដូច្នេះ Po នៅក្រោម ~2.3V (pH 0) មានសុវត្ថិភាពសម្រាប់ ESP32។
+                    (ជម្រើស) Po -> [10k] -> GPIO35 និង 100nF ពី GPIO35 ទៅ GND ការពារ/កាត់ Noise
+                    បើដាក់ Divider 20k/20k នៅពេលក្រោយ សូមដាក់ PH_DIVIDER = 2.0
    - EC Sensor:     AOUT -> GPIO32   (!! តង់ស្យុងចេញមិនលើស 3.3V)
+                    (ជម្រើស) VCC របស់ EC តាម Transistor/MOSFET បញ្ជាដោយ EC_PWR_PIN
+                    ដើម្បីបិទ EC ពេលអាន pH (Probe ទាំងពីរនៅធុងតែមួយ រំខានគ្នា)
    - Water Level:   S    -> GPIO33
      (Sensor Analog ទាំងអស់ប្រើជើង ADC1 ព្រោះ ADC2 មិនដំណើរការពេលបើក WiFi)
 
@@ -125,8 +128,9 @@ const char* STA_PASSWORD = "";
 // ---- pH ----
 // Po របស់ Module ឆ្លងកាត់ Divider (R1=20k, R2=20k) មុនចូល GPIO35
 // ដូច្នេះ ESP32 ឃើញតែពាក់កណ្តាលនៃ Po។ កូដគុណ 2 វិញ ដើម្បីបានតង់ស្យុង Po ពិត។
-// ប្រសិនបើអ្នកដកចេញ Divider សូមដាក់ PH_DIVIDER = 1.0
-const float PH_DIVIDER  = 2.0;
+// បច្ចុប្បន្នមិនទាន់ដាក់ Divider -> 1.0។ បើដាក់ Divider 20k/20k សូមដាក់ 2.0
+// No divider fitted yet -> 1.0. Set 2.0 if a 20k/20k divider is added.
+const float PH_DIVIDER  = 1.0;
 
 // Po (Volt) ពេល pH = 7 -> វាស់ដោយ Short BNC (ដាក់ខ្សែទង់ដែងប៉ះទាំងចំណុចកណ្តាល និងចិញ្ចៀនក្រៅ)
 // ក្នុងការតំឡើងពិត (12V -> LM2596 -> 5V, ដកUSB)។ តម្លៃដែលបានវាស់ = 1.04 V
@@ -137,8 +141,18 @@ const float PH_V_AT_7   = 1.04;
 const float PH_V_PER_PH = 0.18;
 
 // ជួរ Po ដែលចាត់ទុកថា Probe/Module ដំណើរការ។ ក្រៅជួរនេះ -> "pH ERR"
+// 0.30V ~ pH 11, 3.00V ~ ខាងលើ pH 0 (Module Saturate ឬ ADC ជិតពេញ)
 const float PH_V_MIN_OK = 0.30;
-const float PH_V_MAX_OK = 4.50;
+const float PH_V_MAX_OK = 3.00;
+
+// ---- បិទ EC ពេលអាន pH (ជម្រើស) ----
+// pH Probe និង EC Probe នៅធុងតែមួយ៖ ចរន្តពី EC ទាញ Po ធ្លាក់ដល់ ~0.24V (pH:ERR)។
+// បើភ្ជាប់ VCC របស់ Module EC តាម Transistor/MOSFET សូមដាក់លេខ GPIO (ឧ. 14)។
+// -1 = មិនប្រើ (EC បើកជានិច្ច ដូចមុន)។
+// pH and EC probes in one tank interfere; power-gate the EC module via this pin. -1 = off.
+const int  EC_PWR_PIN      = -1;
+const int  EC_PWR_ON_LEVEL = HIGH;    // កម្រិតដែលបើក EC (ប្តូរ LOW បើ Transistor ធ្វើការផ្ទុយ)
+const unsigned long EC_WARMUP_MS = 200;   // រង់ចាំ EC ស្ងប់ក្រោយបើក មុនអាន
 
 // EC: EC (mS/cm) = V * EC_FACTOR  (ត្រូវ Calibrate ជាមួយ Solution ស្គាល់តម្លៃ៖ EC_FACTOR = EC_ស្គាល់ / V)
 const float EC_FACTOR = 3.58;
@@ -200,7 +214,7 @@ float phVolt = 0;               // តង់ស្យុង Po ពិត (បន
 bool  phProbeOk = false;        // pH Module/Probe ដំណើរការ?
 bool  phInit = false, ecInit = false;
 int   levelPercent = 0;
-int   phMv = 0, ecMv = 0, levelMv = 0;   // phMv = mV ត្រង់ GPIO35 (បន្ទាប់ Divider)
+int   phMv = 0, ecMv = 0, levelMv = 0;   // phMv = mV ត្រង់ GPIO35 (មុនគុណ Divider)
 bool  waterOK = false;          // ទឹកច្រោះអាចស្រោចបាន?
 
 // ---- ស្ថានភាព Relay ----
@@ -237,6 +251,11 @@ unsigned long lcdMsgUntil = 0;
 int relaySignal(bool on) {
   if (RELAY_ACTIVE_LOW) return on ? LOW : HIGH;
   return on ? HIGH : LOW;
+}
+
+void ecPower(bool on) {
+  if (EC_PWR_PIN < 0) return;
+  digitalWrite(EC_PWR_PIN, on ? EC_PWR_ON_LEVEL : !EC_PWR_ON_LEVEL);
 }
 
 // The only place that writes a relay pin (applies RELAY_ACTIVE_LOW).
@@ -289,6 +308,8 @@ void setup() {
   Serial.begin(115200);
 
   for (int i = 0; i < 4; i++) initRelayPin(i);
+
+  if (EC_PWR_PIN >= 0) { pinMode(EC_PWR_PIN, OUTPUT); ecPower(false); }   // EC បិទរហូតដល់ពេលអាន
 
   for (int i = 0; i < 4; i++) btns[i] = {BTN_PIN[i], HIGH, HIGH, 0};
   btns[4] = {BTN_MODE_PIN, HIGH, HIGH, 0};
@@ -353,7 +374,8 @@ void readSensors() {
   soilPercent = constrain(map(raw, SOIL_RAW_DRY, SOIL_RAW_WET, 0, 100), 0, 100);
 
   // ---- pH (ធុងស្តុកទឹកច្រោះ) ----
-  phMv   = readMedian(PH_PIN, true);                 // mV ត្រង់ GPIO35 (បន្ទាប់ Divider)
+  // អាន pH មុន ពេល EC នៅបិទ (បើប្រើ EC_PWR_PIN) ដើម្បីកុំឱ្យ EC រំខាន
+  phMv   = readMedian(PH_PIN, true);                 // mV ត្រង់ GPIO35
   phVolt = (phMv / 1000.0f) * PH_DIVIDER;            // តង់ស្យុង Po ពិត (V)
   phProbeOk = (phVolt > PH_V_MIN_OK && phVolt < PH_V_MAX_OK);
   if (phProbeOk) {
@@ -364,7 +386,9 @@ void readSensors() {
   }
 
   // ---- EC (ធុងស្តុកទឹកច្រោះ) ----
+  if (EC_PWR_PIN >= 0) { ecPower(true); delay(EC_WARMUP_MS); }
   ecMv = readMedian(EC_PIN, true);
+  ecPower(false);
   float ec = constrain((ecMv / 1000.0f) * EC_FACTOR, 0.0f, 5.0f);
   if (!ecInit) { ecValue = ec; ecInit = true; }
   else         { ecValue = ecValue * 0.7f + ec * 0.3f; }
@@ -618,7 +642,7 @@ String statusJson() {
     waterOK ? "true" : "false", (int)fillSrc, autoMode ? "true" : "false", warm, fillFault ? "true" : "false",
     relayOn[0], relayOn[1], relayOn[2], relayOn[3],
     blocked[0], blocked[1], blocked[2], blocked[3],
-    phMv, ecMv, levelMv, uptimeString().c_str());
+    (int)(phVolt * 1000), ecMv, levelMv, uptimeString().c_str());   // mv[0] = Po ពិត (សម្រាប់ Calibrate)
   return String(buf);
 }
 
