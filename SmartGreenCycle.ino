@@ -45,9 +45,9 @@
                     Offset ~1.04V ដូច្នេះ Po នៅក្រោម ~2.3V (pH 0) មានសុវត្ថិភាពសម្រាប់ ESP32។
                     (ជម្រើស) Po -> [10k] -> GPIO35 និង 100nF ពី GPIO35 ទៅ GND ការពារ/កាត់ Noise
                     បើដាក់ Divider 20k/20k នៅពេលក្រោយ សូមដាក់ PH_DIVIDER = 2.0
-   - EC Sensor:     AOUT -> GPIO32   (!! តង់ស្យុងចេញមិនលើស 3.3V)
-                    (ជម្រើស) VCC របស់ EC តាម Transistor/MOSFET បញ្ជាដោយ EC_PWR_PIN
-                    ដើម្បីបិទ EC ពេលអាន pH (Probe ទាំងពីរនៅធុងតែមួយ រំខានគ្នា)
+   - EC Sensor:     AOUT -> GPIO32, VCC -> GPIO14 (មិនមែន 5V), GND -> GND
+                    GPIO14 ផ្គត់ផ្គង់ 3.3V ឱ្យ EC តែពេលអាន ដើម្បីបិទ EC ពេលអាន pH
+                    (Probe ទាំងពីរនៅធុងតែមួយ រំខានគ្នា)។ Module EC ស៊ីតែប៉ុន្មាន mA។
    - Water Level:   S    -> GPIO33
      (Sensor Analog ទាំងអស់ប្រើជើង ADC1 ព្រោះ ADC2 មិនដំណើរការពេលបើក WiFi)
 
@@ -150,12 +150,13 @@ const float PH_V_MAX_OK = 3.00;
 
 // ---- បិទ EC ពេលអាន pH (ជម្រើស) ----
 // pH Probe និង EC Probe នៅធុងតែមួយ៖ ចរន្តពី EC ទាញ Po ធ្លាក់ដល់ ~0.24V (pH:ERR)។
-// បើភ្ជាប់ VCC របស់ Module EC តាម Transistor/MOSFET សូមដាក់លេខ GPIO (ឧ. 14)។
-// -1 = មិនប្រើ (EC បើកជានិច្ច ដូចមុន)។
-// pH and EC probes in one tank interfere; power-gate the EC module via this pin. -1 = off.
-const int  EC_PWR_PIN      = -1;
-const int  EC_PWR_ON_LEVEL = HIGH;    // កម្រិតដែលបើក EC (ប្តូរ LOW បើ Transistor ធ្វើការផ្ទុយ)
-const unsigned long EC_WARMUP_MS = 200;   // រង់ចាំ EC ស្ងប់ក្រោយបើក មុនអាន
+// VCC របស់ Module EC ភ្ជាប់ GPIO14 ផ្ទាល់៖ HIGH = បើក (3.3V), LOW = បិទ។
+// -1 = មិនប្រើ (EC ភ្ជាប់ 5V បើកជានិច្ច)។
+// pH and EC probes share a tank; the EC module is powered from this pin only while EC is read.
+const int  EC_PWR_PIN      = 14;
+const int  EC_PWR_ON_LEVEL = HIGH;    // កម្រិតដែលបើក EC (ប្តូរ LOW បើប្រើ Transistor ដែលធ្វើការផ្ទុយ)
+// រង់ចាំ EC ស្ងប់ក្រោយបើក មុនអាន។ បើលេខ EC លោតខ្លាំង សាកបង្កើនដល់ 500
+const unsigned long EC_WARMUP_MS = 300;
 
 // ---- EC ----
 // Calibrate 2 ចំណុច ជាមួយទឹក Calibrate ក្នុងឈុត (mV អានពី WebApp, Probe ក្នុងទឹក 1 នាទី)
@@ -163,7 +164,9 @@ const unsigned long EC_WARMUP_MS = 200;   // រង់ចាំ EC ស្ងប�
 //  12.88 mS/cm = 1390-1450 mV -> 1420 mV
 // EC = EC_CAL_1 + (mV - EC_CAL_MV1) * (EC_CAL_2 - EC_CAL_1) / (EC_CAL_MV2 - EC_CAL_MV1)
 // Two-point linear calibration from the kit's 1413 uS/cm and 12.88 mS/cm solutions.
-// (បើប្តូរ VCC របស់ Module EC ឧ. ទៅ GPIO 3.3V ត្រូវ Calibrate ម្តងទៀត)
+// !! តម្លៃខាងក្រោមវាស់ពេល EC ប្រើ 5V។ ឥឡូវ EC ប្រើ 3.3V ពី GPIO14 ដូច្នេះត្រូវ
+//    Calibrate ម្តងទៀត (វាស់ mV ក្នុងទឹក 1413 និង 12.88) ហើយប្តូរ EC_CAL_MV1/MV2។
+// !! These were measured with the module on 5V; recalibrate now that it runs on 3.3V.
 const float EC_CAL_MV1 = 210;    const float EC_CAL_1 = 1.413;
 const float EC_CAL_MV2 = 1420;   const float EC_CAL_2 = 12.88;
 // ADC ESP32 អានក្រោម ~150 mV មិនបាន (ជាប់ ~142 mV)។ ក្រោមកម្រិតនេះ -> បង្ហាញ "<0.9"
