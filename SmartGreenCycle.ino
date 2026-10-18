@@ -157,8 +157,18 @@ const int  EC_PWR_PIN      = -1;
 const int  EC_PWR_ON_LEVEL = HIGH;    // កម្រិតដែលបើក EC (ប្តូរ LOW បើ Transistor ធ្វើការផ្ទុយ)
 const unsigned long EC_WARMUP_MS = 200;   // រង់ចាំ EC ស្ងប់ក្រោយបើក មុនអាន
 
-// EC: EC (mS/cm) = V * EC_FACTOR  (ត្រូវ Calibrate ជាមួយ Solution ស្គាល់តម្លៃ៖ EC_FACTOR = EC_ស្គាល់ / V)
-const float EC_FACTOR = 3.58;
+// ---- EC ----
+// Calibrate 2 ចំណុច ជាមួយទឹក Calibrate ក្នុងឈុត (mV អានពី WebApp, Probe ក្នុងទឹក 1 នាទី)
+//  1413 uS/cm  = 190-230 mV   -> 210 mV
+//  12.88 mS/cm = 1390-1450 mV -> 1420 mV
+// EC = EC_CAL_1 + (mV - EC_CAL_MV1) * (EC_CAL_2 - EC_CAL_1) / (EC_CAL_MV2 - EC_CAL_MV1)
+// Two-point linear calibration from the kit's 1413 uS/cm and 12.88 mS/cm solutions.
+// (បើប្តូរ VCC របស់ Module EC ឧ. ទៅ GPIO 3.3V ត្រូវ Calibrate ម្តងទៀត)
+const float EC_CAL_MV1 = 210;    const float EC_CAL_1 = 1.413;
+const float EC_CAL_MV2 = 1420;   const float EC_CAL_2 = 12.88;
+// ADC ESP32 អានក្រោម ~150 mV មិនបាន (ជាប់ ~142 mV)។ ក្រោមកម្រិតនេះ -> បង្ហាញ "<0.9"
+// The ESP32 ADC bottoms out at ~142 mV, so below this EC is shown as "below range".
+const int   EC_MV_FLOOR = 155;
 
 // Soil: តម្លៃ raw ពេលដីស្ងួតខ្លាំង (ក្នុងខ្យល់) និងពេលសើមខ្លាំង (ក្នុងទឹក)
 const int SOIL_RAW_DRY = 3000;
@@ -216,6 +226,7 @@ float phValue = 7.0, ecValue = 0.0;
 float phVolt = 0;               // តង់ស្យុង Po ពិត (បន្ទាប់ពីគុណ Divider)
 bool  phProbeOk = false;        // pH Module/Probe ដំណើរការ?
 bool  phInit = false, ecInit = false;
+bool  ecLow = false;            // EC ទាបជាងកម្រិតដែល ESP32 វាស់បាន (ទឹកសាប ល្អ)
 int   levelPercent = 0;
 int   phMv = 0, ecMv = 0, levelMv = 0;   // phMv = mV ត្រង់ GPIO35 (មុនគុណ Divider)
 bool  waterOK = false;          // ទឹកច្រោះអាចស្រោចបាន?
@@ -259,6 +270,10 @@ int relaySignal(bool on) {
 void ecPower(bool on) {
   if (EC_PWR_PIN < 0) return;
   digitalWrite(EC_PWR_PIN, on ? EC_PWR_ON_LEVEL : !EC_PWR_ON_LEVEL);
+}
+
+float ecFromMv(float mv) {
+  return EC_CAL_1 + (mv - EC_CAL_MV1) * (EC_CAL_2 - EC_CAL_1) / (EC_CAL_MV2 - EC_CAL_MV1);
 }
 
 // The only place that writes a relay pin (applies RELAY_ACTIVE_LOW).
@@ -392,7 +407,8 @@ void readSensors() {
   if (EC_PWR_PIN >= 0) { ecPower(true); delay(EC_WARMUP_MS); }
   ecMv = readMedian(EC_PIN, true);
   ecPower(false);
-  float ec = constrain((ecMv / 1000.0f) * EC_FACTOR, 0.0f, 5.0f);
+  ecLow = ecMv < EC_MV_FLOOR;
+  float ec = ecLow ? 0.0f : constrain(ecFromMv(ecMv), 0.0f, 20.0f);
   if (!ecInit) { ecValue = ec; ecInit = true; }
   else         { ecValue = ecValue * 0.7f + ec * 0.3f; }
 
@@ -539,8 +555,11 @@ void updateDisplay() {
     else       snprintf(l0, sizeof(l0), "DHT11 error");
     snprintf(l1, sizeof(l1), "Soil:%d%%  %s", soilPercent, modeTxt);
   } else if (lcdPage == 1) {
-    if (phProbeOk) snprintf(l0, sizeof(l0), "pH:%.2f EC:%.2f", phValue, ecValue);
-    else           snprintf(l0, sizeof(l0), "pH:ERR EC:%.2f", ecValue);
+    char ecTxt[8];
+    if (ecLow) snprintf(ecTxt, sizeof(ecTxt), "<%.1f", ecFromMv(EC_MV_FLOOR));
+    else       snprintf(ecTxt, sizeof(ecTxt), "%.2f", ecValue);
+    if (phProbeOk) snprintf(l0, sizeof(l0), "pH:%.2f EC:%s", phValue, ecTxt);
+    else           snprintf(l0, sizeof(l0), "pH:ERR EC:%s", ecTxt);
     if (fillFault) snprintf(l1, sizeof(l1), "Tank:%d%% FAULT!", levelPercent);
     else           snprintf(l1, sizeof(l1), "Tank:%d%% %s", levelPercent, waterOK ? "Wtr:OK" : "Wtr:BAD");
   } else {
@@ -635,13 +654,13 @@ String uptimeString() {
 String statusJson() {
   unsigned long up = millis() - bootMillis;
   int warm = (autoMode && up < WARMUP_MS) ? (int)((WARMUP_MS - up) / 1000) + 1 : 0;
-  char buf[560];
+  char buf[640];
   snprintf(buf, sizeof(buf),
-    "{\"t\":%.1f,\"h\":%.0f,\"dht\":%s,\"soil\":%d,\"ph\":%.2f,\"phok\":%s,\"ec\":%.2f,\"lvl\":%d,"
+    "{\"t\":%.1f,\"h\":%.0f,\"dht\":%s,\"soil\":%d,\"ph\":%.2f,\"phok\":%s,\"ec\":%.2f,\"eclow\":%s,\"ecmin\":%.1f,\"lvl\":%d,"
     "\"wq\":%s,\"src\":%d,\"auto\":%s,\"warm\":%d,\"fault\":%s,"
     "\"r\":[%d,%d,%d,%d],\"blk\":[%d,%d,%d,%d],\"mv\":[%d,%d,%d],\"up\":\"%s\"}",
     temperature, humidity, dhtOk ? "true" : "false", soilPercent, phValue,
-    phProbeOk ? "true" : "false", ecValue, levelPercent,
+    phProbeOk ? "true" : "false", ecValue, ecLow ? "true" : "false", ecFromMv(EC_MV_FLOOR), levelPercent,
     waterOK ? "true" : "false", (int)fillSrc, autoMode ? "true" : "false", warm, fillFault ? "true" : "false",
     relayOn[0], relayOn[1], relayOn[2], relayOn[3],
     blocked[0], blocked[1], blocked[2], blocked[3],

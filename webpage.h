@@ -385,12 +385,12 @@ footer{text-align:center;font-size:.78rem;color:var(--muted);margin-top:22px}
     else if(p<80){st.textContent='សំណើមល្អ';st.style.color='var(--goodtx)';f.style.background='var(--green)'}
     else{st.textContent='ដីសើមខ្លាំង';st.style.color='var(--blue)';f.style.background='var(--blue)'}
     // pH / EC
-    $('vec').textContent=d.ec.toFixed(2);
+    $('vec').textContent=d.eclow?'<'+d.ecmin.toFixed(1):d.ec.toFixed(2);
     if(d.phok===false){$('vph').textContent='ERR';chip('cph','bad','Sensor pH មានបញ្ហា')}
     else{$('vph').textContent=d.ph.toFixed(2);
     if(d.ph<cfg.phMin) chip('cph','warn','ទាប (អាស៊ីត)'); else if(d.ph>cfg.phMax) chip('cph','warn','ខ្ពស់ (បាស)'); else chip('cph','good','ល្អ');
     hist.push(d.ph); if(hist.length>90) hist.shift(); draw();}
-    d.ec>cfg.ecMax?chip('cec','warn','ប្រៃ/កខ្វក់ពេក'):chip('cec','good','ល្អ');
+    d.eclow?chip('cec','good','ទាប (ទឹកសាប)'):d.ec>cfg.ecMax?chip('cec','warn','ប្រៃ/កខ្វក់ពេក'):chip('cec','good','ល្អ');
     // water quality
     var box=$('wqBox'); box.className='wq '+(d.wq?'good':'bad');
     $('wqT').textContent=d.wq?'ទឹកច្រោះ អាចយកមកស្រោចបាន':'ទឹកច្រោះ មិនទាន់ល្អ → ប្រើទឹកស្អាត';
