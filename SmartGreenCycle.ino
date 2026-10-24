@@ -49,8 +49,8 @@
    - EC Sensor:     AOUT -> GPIO32, VCC -> GPIO14 (មិនមែន 5V), GND -> GND
                     GPIO14 ផ្គត់ផ្គង់ 3.3V ឱ្យ EC តែពេលអាន ដើម្បីបិទ EC ពេលអាន pH
                     (Probe ទាំងពីរនៅធុងតែមួយ រំខានគ្នា)។ Module EC ស៊ីតែប៉ុន្មាន mA។
-   - Ultrasonic:    VCC -> 5V, GND -> GND, TRIG -> GPIO5, ECHO -> GPIO2
-                    (!! ECHO របស់ HC-SR04 ចេញ 5V -> ត្រូវដាក់ Divider (ឧ. 1k + 2k) មុនចូល GPIO2
+   - Ultrasonic:    VCC -> 5V, GND -> GND, TRIG -> GPIO5, ECHO -> GPIO36 (VP)
+                    (!! ECHO របស់ HC-SR04 ចេញ 5V -> ត្រូវដាក់ Divider (ឧ. 1k + 2k) មុនចូល GPIO36
                      ឬប្រើ HC-SR04P / RCWL-1601 ដែលចេញ 3.3V)
      (Sensor Analog ទាំងអស់ប្រើជើង ADC1 ព្រោះ ADC2 មិនដំណើរការពេលបើក WiFi)
 
@@ -96,7 +96,7 @@
 #define PH_PIN      35
 #define EC_PIN      32
 #define TRIG_PIN    5      // HC-SR04 TRIG
-#define ECHO_PIN    2      // HC-SR04 ECHO (ត្រូវការ Divider ប្រសិនបើ 5V)
+#define ECHO_PIN    36     // HC-SR04 ECHO = ជើង VP (Input ប៉ុណ្ណោះ មិនមែន Strapping) ត្រូវការ Divider បើ 5V
 
 const int RELAY_PIN[4] = {25, 26, 13, 19};
 const int BTN_PIN[4]   = {16, 17, 4, 27};
