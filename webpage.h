@@ -283,7 +283,7 @@ footer{text-align:center;font-size:.78rem;color:var(--muted);margin-top:22px}
         </div>
       </fieldset>
       <div class="act"><button class="btn" type="submit">រក្សាទុក</button>
-        <div class="cal" id="cal">Calibrate: pH -- mV · EC -- mV · Level -- mV</div></div>
+        <div class="cal" id="cal">Calibrate: pH -- mV · EC -- mV · Level -- cm</div></div>
     </form>
   </div>
 
@@ -317,7 +317,7 @@ footer{text-align:center;font-size:.78rem;color:var(--muted);margin-top:22px}
   function chip(id,cls,txt){var c=$(id);c.className='chip '+cls;c.textContent=txt}
 
   /* ---------- DEMO (បើកឯកសារលើកុំព្យូទ័រ) ---------- */
-  var D={t:31.5,h:58,dht:true,soil:44,ph:6.9,ec:1.1,lvl:52,wq:true,src:0,auto:true,warm:0,fault:false,r:[0,0,0,0],blk:[0,0,0,0],mv:[1480,310,1090],up:'00:12:40',_s:760};
+  var D={t:31.5,h:58,dht:true,soil:44,ph:6.9,ec:1.1,lvl:52,wq:true,src:0,auto:true,warm:0,fault:false,r:[0,0,0,0],blk:[0,0,0,0],mv:[1480,310,170],up:'00:12:40',_s:760};
   function demo(path){
     var q={};(path.split('?')[1]||'').split('&').forEach(function(kv){var a=kv.split('=');if(a[0])q[a[0]]=decodeURIComponent(a[1]||'')});
     if(path.indexOf('/config')===0) return cfg;
@@ -338,7 +338,7 @@ footer{text-align:center;font-size:.78rem;color:var(--muted);margin-top:22px}
       }
       D.blk=[D.lvl<10,D.lvl<10,D.lvl>=95,D.lvl>=95].map(Number);
       D._s+=2; var s=D._s; D.up=[s/3600|0,(s/60|0)%60,s%60].map(function(x){return (x<10?'0':'')+x}).join(':');
-      D.mv=[Math.round((1.5-(D.ph-7)*.18)*1000),Math.round(D.ec/3.58*1000),Math.round(100+D.lvl*19)];
+      D.mv=[Math.round((1.5-(D.ph-7)*.18)*1000),Math.round(D.ec/3.58*1000),Math.round(300-D.lvl*2.5)];
     }
     return JSON.parse(JSON.stringify(D));
   }
@@ -405,6 +405,7 @@ footer{text-align:center;font-size:.78rem;color:var(--muted);margin-top:22px}
     if(h<10){ls.textContent='ទឹកជិតអស់ · ហាមម៉ូទ័រដំណើរការ';ls.style.color='var(--badtx)';lf.style.background='var(--red)'}
     else if(h<cfg.levelLow){ls.textContent='ទឹកខ្វះ · ត្រូវបញ្ចូលទឹក';ls.style.color='var(--warntx)';lf.style.background='var(--amber)'}
     else{ls.textContent='គ្រប់គ្រាន់';ls.style.color='var(--goodtx)';lf.style.background='var(--blue)'}
+    if(d.lvlok===false){$('vl').textContent='ERR';$('tl').textContent='ERR';lf.style.width='0%';ls.textContent='Sensor កម្រិតទឹកអានមិនបាន · ម៉ូទ័រ/Valve ត្រូវបានបិទ';ls.style.color='var(--badtx)'}
     // mode
     $('mAuto').setAttribute('aria-pressed',d.auto); $('mMan').setAttribute('aria-pressed',!d.auto);
     $('up').textContent='ដំណើរការ '+d.up;
@@ -418,12 +419,13 @@ footer{text-align:center;font-size:.78rem;color:var(--muted);margin-top:22px}
       stx.innerHTML=RL[i].sub+' · '+(on?'ON':'OFF')+(d.auto?' · Auto':'')+(d.blk[i]?'<br><span class="lock">🔒 '+RL[i].lock+'</span>':'');
     });
     $('rcount').textContent='បើក '+n+' / 4';
-    $('cal').textContent='Calibrate: pH Po '+d.mv[0]+' mV · EC '+d.mv[1]+' mV · Level '+d.mv[2]+' mV';
+    $('cal').textContent='Calibrate: pH Po '+d.mv[0]+' mV · EC '+d.mv[1]+' mV · Level '+(d.mv[2]/10).toFixed(1)+' cm';
     // alerts
     var a='';
     if(DEMO) a+='<div class="alert info">DEMO · ទិន្នន័យក្លែងធ្វើ (បើកពី ESP32 ដើម្បីឃើញទិន្នន័យពិត)</div>';
     if(d.fault) a+='<div class="alert bad"><span>បញ្ចូលទឹកយូរពេក តែធុងស្រោចមិនឡើង។ សូមពិនិត្យ Valve ទុយោ និងប្រភពទឹក។</span><button type="button" id="rst">កំណត់ឡើងវិញ</button></div>';
     if(d.phok===false) a+='<div class="alert bad">Sensor pH អានមិនបាន (Po '+d.mv[0]+' mV)។ ពិនិត្យខ្សែ Probe ឬដក EC Probe ចេញពីធុង។ ប្រព័ន្ធប្រើទឹកស្អាតជំនួស។</div>';
+    if(d.lvlok===false) a+='<div class="alert bad">Sensor កម្រិតទឹក (HC-SR04) អានមិនបាន។ ពិនិត្យខ្សែ TRIG/ECHO និងទីតាំង Sensor។ ម៉ូទ័រ និង Valve ត្រូវបានបិទដើម្បីសុវត្ថិភាព។</div>';
     if(d.warm>0) a+='<div class="alert warn">កំពុងរង់ចាំ Sensor pH/EC ស្ងប់ ('+d.warm+'s) មុនចាប់ផ្តើម Auto</div>';
     $('alerts').innerHTML=a;
     if($('rst')) $('rst').onclick=function(){api('/reset').then(render)};

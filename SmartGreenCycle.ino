@@ -24,7 +24,7 @@
    - Capacitive Soil Moisture Sensor (សំណើមដី)
    - pH Sensor Module (ឧ. PH-4502C)         -> ធុងស្តុកទឹកច្រោះ
    - EC / TDS Sensor Module                 -> ធុងស្តុកទឹកច្រោះ
-   - Water Level Sensor (Analog)            -> ធុងស្រោច
+   - Ultrasonic HC-SR04 (វាស់ចម្ងាយទៅផ្ទៃទឹក) -> ធុងស្រោច (ដាក់ពីលើធុង បែរចុះក្រោម)
    - Relay 4-Channel
    - Push Button 5 គ្រាប់
 
@@ -41,14 +41,17 @@
    - LCD 16x2:      SDA -> GPIO21, SCL -> GPIO22, VCC -> 5V, GND -> GND
    - DHT11:         DATA -> GPIO23
    - Soil Sensor:   AOUT -> GPIO34
-   - pH Sensor:     Po   -> GPIO35 ផ្ទាល់ (គ្មាន Divider -> PH_DIVIDER = 1.0)
+   - pH Sensor:     VCC -> GPIO33 (មិនមែន 5V), GND -> GND
+                    Po   -> GPIO35 ផ្ទាល់ (គ្មាន Divider -> PH_DIVIDER = 1.0)
                     Offset ~1.04V ដូច្នេះ Po នៅក្រោម ~2.3V (pH 0) មានសុវត្ថិភាពសម្រាប់ ESP32។
                     (ជម្រើស) Po -> [10k] -> GPIO35 និង 100nF ពី GPIO35 ទៅ GND ការពារ/កាត់ Noise
                     បើដាក់ Divider 20k/20k នៅពេលក្រោយ សូមដាក់ PH_DIVIDER = 2.0
    - EC Sensor:     AOUT -> GPIO32, VCC -> GPIO14 (មិនមែន 5V), GND -> GND
                     GPIO14 ផ្គត់ផ្គង់ 3.3V ឱ្យ EC តែពេលអាន ដើម្បីបិទ EC ពេលអាន pH
                     (Probe ទាំងពីរនៅធុងតែមួយ រំខានគ្នា)។ Module EC ស៊ីតែប៉ុន្មាន mA។
-   - Water Level:   S    -> GPIO33
+   - Ultrasonic:    VCC -> 5V, GND -> GND, TRIG -> GPIO5, ECHO -> GPIO2
+                    (!! ECHO របស់ HC-SR04 ចេញ 5V -> ត្រូវដាក់ Divider (ឧ. 1k + 2k) មុនចូល GPIO2
+                     ឬប្រើ HC-SR04P / RCWL-1601 ដែលចេញ 3.3V)
      (Sensor Analog ទាំងអស់ប្រើជើង ADC1 ព្រោះ ADC2 មិនដំណើរការពេលបើក WiFi)
 
    - Relay 1 (IN1) -> GPIO25 : ម៉ូទ័របាញ់តាមគល់ដំណាំ (Drip pump)
@@ -92,7 +95,8 @@
 #define SOIL_PIN    34
 #define PH_PIN      35
 #define EC_PIN      32
-#define LEVEL_PIN   33
+#define TRIG_PIN    5      // HC-SR04 TRIG
+#define ECHO_PIN    2      // HC-SR04 ECHO (ត្រូវការ Divider ប្រសិនបើ 5V)
 
 const int RELAY_PIN[4] = {25, 26, 13, 19};
 const int BTN_PIN[4]   = {16, 17, 4, 27};
@@ -158,6 +162,14 @@ const int  EC_PWR_ON_LEVEL = HIGH;    // កម្រិតដែលបើក EC
 // រង់ចាំ EC ស្ងប់ក្រោយបើក មុនអាន។ បើលេខ EC លោតខ្លាំង សាកបង្កើនដល់ 500
 const unsigned long EC_WARMUP_MS = 300;
 
+// VCC របស់ Module pH ភ្ជាប់ GPIO33៖ pH បើកជាធម្មតា ហើយបិទតែពេលអាន EC (EC ជាអ្នករំខាន)។
+// -1 = មិនប្រើ (pH ភ្ជាប់ 5V បើកជានិច្ច)។
+// pH module is powered from this pin: on normally, off only while EC is sampled.
+// !! Module pH ប្រើ 3.3V ឥឡូវ -> Po ប្រែ ត្រូវ Calibrate pH ម្តងទៀត (Buffer pH 7 និង pH 4)
+// !! pH module runs on 3.3V now: recalibrate PH_V_AT_7 / PH_V_PER_PH.
+const int  PH_PWR_PIN      = 33;
+const int  PH_PWR_ON_LEVEL = HIGH;
+
 // ---- EC ----
 // Calibrate 2 ចំណុច ជាមួយទឹក Calibrate ក្នុងឈុត (mV អានពី WebApp, Probe ក្នុងទឹក 1 នាទី)
 //  1413 uS/cm  = 190-230 mV   -> 210 mV
@@ -177,9 +189,15 @@ const int   EC_MV_FLOOR = 155;
 const int SOIL_RAW_DRY = 3000;
 const int SOIL_RAW_WET = 1200;
 
-// Water Level: តម្លៃ mV ពេលធុងទទេ និងពេលធុងពេញ (មើល "Level mV" លើ WebApp)
-const int LEVEL_MV_EMPTY = 100;
-const int LEVEL_MV_FULL  = 2000;
+// Water Level (HC-SR04)៖ ចម្ងាយពី Sensor ទៅផ្ទៃទឹក (cm)
+// TANK_EMPTY_CM = ចម្ងាយពេលធុងទទេ (Sensor -> បាតធុង)
+// TANK_FULL_CM  = ចម្ងាយពេលធុងពេញ (ត្រូវ >= 5 cm ព្រោះ HC-SR04 វាស់ក្រោម ~2-3 cm មិនបាន)
+// !! តម្លៃខាងក្រោមជាតម្លៃសាកល្បង។ វាស់ធុងពិត ហើយមើល "Level ... cm" លើ WebApp ដើម្បីកំណត់។
+// Placeholder values - measure your tank and set both.
+const float TANK_EMPTY_CM = 30.0;
+const float TANK_FULL_CM  = 5.0;
+const unsigned long ECHO_TIMEOUT_US = 25000;   // ~4 m
+const int  LEVEL_FAIL_MAX = 3;                 // អានមិនបានជាប់គ្នា 3 ដង (~6s) -> Sensor Error
 
 // ==========================================================
 // ៤. ការកំណត់ Auto (អាចកែពី WebApp ហើយរក្សាទុកក្នុង Flash)
@@ -231,7 +249,10 @@ bool  phProbeOk = false;        // pH Module/Probe ដំណើរការ?
 bool  phInit = false, ecInit = false;
 bool  ecLow = false;            // EC ទាបជាងកម្រិតដែល ESP32 វាស់បាន (ទឹកសាប ល្អ)
 int   levelPercent = 0;
-int   phMv = 0, ecMv = 0, levelMv = 0;   // phMv = mV ត្រង់ GPIO35 (មុនគុណ Divider)
+int   levelMm = 0;              // ចម្ងាយ Sensor -> ផ្ទៃទឹក (mm)
+bool  levelOk = false;          // HC-SR04 ឆ្លើយតប? (false -> ម៉ូទ័រ/Valve ត្រូវបានបិទ)
+int   levelFails = LEVEL_FAIL_MAX;
+int   phMv = 0, ecMv = 0;       // phMv = mV ត្រង់ GPIO35 (មុនគុណ Divider)
 bool  waterOK = false;          // ទឹកច្រោះអាចស្រោចបាន?
 
 // ---- ស្ថានភាព Relay ----
@@ -273,6 +294,38 @@ int relaySignal(bool on) {
 void ecPower(bool on) {
   if (EC_PWR_PIN < 0) return;
   digitalWrite(EC_PWR_PIN, on ? EC_PWR_ON_LEVEL : !EC_PWR_ON_LEVEL);
+}
+
+void phPower(bool on) {
+  if (PH_PWR_PIN < 0) return;
+  digitalWrite(PH_PWR_PIN, on ? PH_PWR_ON_LEVEL : !PH_PWR_ON_LEVEL);
+}
+
+// វាស់ចម្ងាយ (cm) ដោយ HC-SR04។ យកតម្លៃកណ្តាលពី 5 ដង ហើយកែល្បឿនសំឡេងតាមសីតុណ្ហភាព។
+// ត្រឡប់ -1 បើមិនឆ្លើយតប (ខ្សែដាច់ ឬមិនឃើញផ្ទៃទឹក)។
+// Median of 5 pings, speed of sound corrected for temperature. Returns -1 on failure.
+float readDistanceCm() {
+  float cmPerUs = 0.03313f + 0.0000606f * (dhtOk ? temperature : 25.0f);
+  float v[5];
+  int n = 0;
+  for (int i = 0; i < 5; i++) {
+    digitalWrite(TRIG_PIN, LOW);  delayMicroseconds(4);
+    digitalWrite(TRIG_PIN, HIGH); delayMicroseconds(10);
+    digitalWrite(TRIG_PIN, LOW);
+    unsigned long us = pulseIn(ECHO_PIN, HIGH, ECHO_TIMEOUT_US);
+    if (us > 0) {
+      float d = us * cmPerUs / 2.0f;
+      if (d >= 2.0f && d <= 400.0f) v[n++] = d;
+    }
+    delay(30);   // ឱ្យ Echo ចាស់រលាយ មុន Ping បន្ទាប់
+  }
+  if (n < 3) return -1;
+  for (int i = 1; i < n; i++) {          // insertion sort
+    float x = v[i]; int j = i - 1;
+    while (j >= 0 && v[j] > x) { v[j + 1] = v[j]; j--; }
+    v[j + 1] = x;
+  }
+  return v[n / 2];
 }
 
 float ecFromMv(float mv) {
@@ -331,6 +384,10 @@ void setup() {
   for (int i = 0; i < 4; i++) initRelayPin(i);
 
   if (EC_PWR_PIN >= 0) { pinMode(EC_PWR_PIN, OUTPUT); ecPower(false); }   // EC បិទរហូតដល់ពេលអាន
+  if (PH_PWR_PIN >= 0) { pinMode(PH_PWR_PIN, OUTPUT); phPower(true); }    // pH បើកជាធម្មតា
+
+  pinMode(TRIG_PIN, OUTPUT); digitalWrite(TRIG_PIN, LOW);
+  pinMode(ECHO_PIN, INPUT);
 
   for (int i = 0; i < 4; i++) btns[i] = {BTN_PIN[i], HIGH, HIGH, 0};
   btns[4] = {BTN_MODE_PIN, HIGH, HIGH, 0};
@@ -407,17 +464,27 @@ void readSensors() {
   }
 
   // ---- EC (ធុងស្តុកទឹកច្រោះ) ----
+  phPower(false);                                 // បិទ pH ពេល EC ដំណើរការ
   if (EC_PWR_PIN >= 0) { ecPower(true); delay(EC_WARMUP_MS); }
   ecMv = readMedian(EC_PIN, true);
   ecPower(false);
+  phPower(true);                                  // បើក pH វិញ ឱ្យស្ងប់មុនអានលើកក្រោយ
   ecLow = ecMv < EC_MV_FLOOR;
   float ec = ecLow ? 0.0f : constrain(ecFromMv(ecMv), 0.0f, 20.0f);
   if (!ecInit) { ecValue = ec; ecInit = true; }
   else         { ecValue = ecValue * 0.7f + ec * 0.3f; }
 
   // ---- Water Level (ធុងស្រោច) ----
-  levelMv = readMedian(LEVEL_PIN, true);
-  levelPercent = constrain(map(levelMv, LEVEL_MV_EMPTY, LEVEL_MV_FULL, 0, 100), 0, 100);
+  float distCm = readDistanceCm();
+  if (distCm > 0) {
+    levelFails = 0;
+    levelMm = (int)(distCm * 10.0f);
+    float pct = (TANK_EMPTY_CM - distCm) * 100.0f / (TANK_EMPTY_CM - TANK_FULL_CM);
+    levelPercent = constrain((int)(pct + 0.5f), 0, 100);
+  } else if (levelFails < LEVEL_FAIL_MAX) {
+    levelFails++;                                 // អនុញ្ញាតឱ្យខកម្តងម្កាល មុនប្រកាស Error
+  }
+  levelOk = levelFails < LEVEL_FAIL_MAX;
 
   // ---- គុណភាពទឹកច្រោះ ----
   // Probe មិនដំណើរការ ឬ pH ក្រៅ 2..12 -> ចាត់ទុកថាមិនល្អ (ប្រើទឹកស្អាតជំនួស)
@@ -433,23 +500,27 @@ void runAuto(unsigned long now, bool want[4]) {
   if (now - bootMillis < WARMUP_MS) return;   // រង់ចាំ Sensor ស្ងប់
 
   // ---- 1) បញ្ចូលទឹកក្នុងធុងស្រោច (R3 / R4) ----
-  if (fillFault && levelPercent >= cfg.levelHigh) fillFault = false;   // មាននរណាម្នាក់បញ្ចូលទឹករួច
+  if (!levelOk) {
+    fillSrc = SRC_NONE;                            // មិនដឹងកម្រិតទឹក -> មិនបញ្ចូលទឹក
+  } else {
+    if (fillFault && levelPercent >= cfg.levelHigh) fillFault = false;   // មាននរណាម្នាក់បញ្ចូលទឹករួច
 
-  if (fillSrc == SRC_NONE) {
-    if (!fillFault && levelPercent < cfg.levelLow) {
-      // សម្រេចប្រភពទឹកនៅពេលចាប់ផ្តើម៖ ទឹកច្រោះជាអាទិភាព (សន្សំទឹក)
-      fillSrc = waterOK ? SRC_FILTERED : SRC_CLEAN;
-      fillStart = now;
-    }
-  } else if (levelPercent >= cfg.levelHigh) {
-    fillSrc = SRC_NONE;                          // ពេញហើយ
-  } else if (fillSrc == SRC_FILTERED && !waterOK) {
-    fillSrc = SRC_CLEAN; fillStart = now;        // ទឹកច្រោះប្រែជាមិនល្អពាក់កណ្តាលទី
-  } else if (now - fillStart > FILL_TIMEOUT_MS) {
-    if (fillSrc == SRC_FILTERED) {
-      fillSrc = SRC_CLEAN; fillStart = now;      // ប្រហែលធុងស្តុកទឹកច្រោះអស់ទឹក -> ប្តូរទៅទឹកស្អាត
-    } else {
-      fillSrc = SRC_NONE; fillFault = true;      // ទឹកស្អាតក៏មិនចូល -> មានបញ្ហា
+    if (fillSrc == SRC_NONE) {
+      if (!fillFault && levelPercent < cfg.levelLow) {
+        // សម្រេចប្រភពទឹកនៅពេលចាប់ផ្តើម៖ ទឹកច្រោះជាអាទិភាព (សន្សំទឹក)
+        fillSrc = waterOK ? SRC_FILTERED : SRC_CLEAN;
+        fillStart = now;
+      }
+    } else if (levelPercent >= cfg.levelHigh) {
+      fillSrc = SRC_NONE;                          // ពេញហើយ
+    } else if (fillSrc == SRC_FILTERED && !waterOK) {
+      fillSrc = SRC_CLEAN; fillStart = now;        // ទឹកច្រោះប្រែជាមិនល្អពាក់កណ្តាលទី
+    } else if (now - fillStart > FILL_TIMEOUT_MS) {
+      if (fillSrc == SRC_FILTERED) {
+        fillSrc = SRC_CLEAN; fillStart = now;      // ប្រហែលធុងស្តុកទឹកច្រោះអស់ទឹក -> ប្តូរទៅទឹកស្អាត
+      } else {
+        fillSrc = SRC_NONE; fillFault = true;      // ទឹកស្អាតក៏មិនចូល -> មានបញ្ហា
+      }
     }
   }
   want[R_FILTER] = (fillSrc == SRC_FILTERED);
@@ -474,8 +545,10 @@ void updateRelays() {
   if (autoMode) runAuto(now, want);
   else for (int i = 0; i < 4; i++) want[i] = manualState[i];
 
-  bool pumpBlock  = ENABLE_SAFETY && levelPercent < LEVEL_PUMP_MIN;
-  bool valveBlock = ENABLE_SAFETY && levelPercent >= LEVEL_OVERFLOW;
+  // Sensor កម្រិតទឹកមិនឆ្លើយតប (!levelOk) -> បិទទាំងម៉ូទ័រ និង Valve ដើម្បីសុវត្ថិភាព
+  // Level sensor failed -> block pumps (dry-run) and valves (overflow) to fail safe.
+  bool pumpBlock  = ENABLE_SAFETY && (!levelOk || levelPercent < LEVEL_PUMP_MIN);
+  bool valveBlock = ENABLE_SAFETY && (!levelOk || levelPercent >= LEVEL_OVERFLOW);
   blocked[R_DRIP] = blocked[R_MIST] = pumpBlock;
   blocked[R_CLEAN] = blocked[R_FILTER] = valveBlock;
 
@@ -563,7 +636,8 @@ void updateDisplay() {
     else       snprintf(ecTxt, sizeof(ecTxt), "%.2f", ecValue);
     if (phProbeOk) snprintf(l0, sizeof(l0), "pH:%.2f EC:%s", phValue, ecTxt);
     else           snprintf(l0, sizeof(l0), "pH:ERR EC:%s", ecTxt);
-    if (fillFault) snprintf(l1, sizeof(l1), "Tank:%d%% FAULT!", levelPercent);
+    if (!levelOk)  snprintf(l1, sizeof(l1), "Tank:ERR sensor");
+    else if (fillFault) snprintf(l1, sizeof(l1), "Tank:%d%% FAULT!", levelPercent);
     else           snprintf(l1, sizeof(l1), "Tank:%d%% %s", levelPercent, waterOK ? "Wtr:OK" : "Wtr:BAD");
   } else {
     snprintf(l0, sizeof(l0), "R1:%-3s R2:%-3s", relayOn[0] ? "ON" : "OFF", relayOn[1] ? "ON" : "OFF");
@@ -574,9 +648,9 @@ void updateDisplay() {
 }
 
 void logSerial() {
-  Serial.printf("T=%.1f H=%.0f Soil=%d pH=%.2f(gpio %dmV, Po %.2fV, %s) EC=%.2f(%dmV) Lv=%d%%(%dmV) WaterOK=%d Src=%d R=%d%d%d%d %s\n",
+  Serial.printf("T=%.1f H=%.0f Soil=%d pH=%.2f(gpio %dmV, Po %.2fV, %s) EC=%.2f(%dmV) Lv=%d%%(%d mm%s) WaterOK=%d Src=%d R=%d%d%d%d %s\n",
                 temperature, humidity, soilPercent, phValue, phMv, phVolt, phProbeOk ? "ok" : "ERR",
-                ecValue, ecMv, levelPercent, levelMv, waterOK, fillSrc,
+                ecValue, ecMv, levelPercent, levelMm, levelOk ? "" : " ERR", waterOK, fillSrc,
                 relayOn[0], relayOn[1], relayOn[2], relayOn[3], autoMode ? "AUTO" : "MANUAL");
 }
 
@@ -657,17 +731,17 @@ String uptimeString() {
 String statusJson() {
   unsigned long up = millis() - bootMillis;
   int warm = (autoMode && up < WARMUP_MS) ? (int)((WARMUP_MS - up) / 1000) + 1 : 0;
-  char buf[640];
+  char buf[720];
   snprintf(buf, sizeof(buf),
-    "{\"t\":%.1f,\"h\":%.0f,\"dht\":%s,\"soil\":%d,\"ph\":%.2f,\"phok\":%s,\"ec\":%.2f,\"eclow\":%s,\"ecmin\":%.1f,\"lvl\":%d,"
+    "{\"t\":%.1f,\"h\":%.0f,\"dht\":%s,\"soil\":%d,\"ph\":%.2f,\"phok\":%s,\"ec\":%.2f,\"eclow\":%s,\"ecmin\":%.1f,\"lvl\":%d,\"lvlok\":%s,"
     "\"wq\":%s,\"src\":%d,\"auto\":%s,\"warm\":%d,\"fault\":%s,"
     "\"r\":[%d,%d,%d,%d],\"blk\":[%d,%d,%d,%d],\"mv\":[%d,%d,%d],\"up\":\"%s\"}",
     temperature, humidity, dhtOk ? "true" : "false", soilPercent, phValue,
-    phProbeOk ? "true" : "false", ecValue, ecLow ? "true" : "false", ecFromMv(EC_MV_FLOOR), levelPercent,
+    phProbeOk ? "true" : "false", ecValue, ecLow ? "true" : "false", ecFromMv(EC_MV_FLOOR), levelPercent, levelOk ? "true" : "false",
     waterOK ? "true" : "false", (int)fillSrc, autoMode ? "true" : "false", warm, fillFault ? "true" : "false",
     relayOn[0], relayOn[1], relayOn[2], relayOn[3],
     blocked[0], blocked[1], blocked[2], blocked[3],
-    (int)(phVolt * 1000), ecMv, levelMv, uptimeString().c_str());   // mv[0] = Po ពិត (សម្រាប់ Calibrate)
+    (int)(phVolt * 1000), ecMv, levelMm, uptimeString().c_str());   // mv[2] = ចម្ងាយ mm   // mv[0] = Po ពិត (សម្រាប់ Calibrate)
   return String(buf);
 }
 
