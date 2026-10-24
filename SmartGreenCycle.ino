@@ -42,10 +42,9 @@
    - DHT11:         DATA -> GPIO23
    - Soil Sensor:   AOUT -> GPIO34
    - pH Sensor:     VCC -> GPIO33 (មិនមែន 5V), GND -> GND
-                    Po   -> GPIO35 ផ្ទាល់ (គ្មាន Divider -> PH_DIVIDER = 1.0)
-                    Offset ~1.04V ដូច្នេះ Po នៅក្រោម ~2.3V (pH 0) មានសុវត្ថិភាពសម្រាប់ ESP32។
-                    (ជម្រើស) Po -> [10k] -> GPIO35 និង 100nF ពី GPIO35 ទៅ GND ការពារ/កាត់ Noise
-                    បើដាក់ Divider 20k/20k នៅពេលក្រោយ សូមដាក់ PH_DIVIDER = 2.0
+                    Po   -> [R1 10k] -> GPIO35 -> [R2 10k] -> GND  (Divider 1:2 -> PH_DIVIDER = 2.0)
+                    (ជម្រើស) Capacitor 100nF ពី GPIO35 ទៅ GND កាត់ Noise
+                    បើដក Divider ចេញ សូមដាក់ PH_DIVIDER = 1.0
    - EC Sensor:     AOUT -> GPIO32, VCC -> GPIO14 (មិនមែន 5V), GND -> GND
                     GPIO14 ផ្គត់ផ្គង់ 3.3V ឱ្យ EC តែពេលអាន ដើម្បីបិទ EC ពេលអាន pH
                     (Probe ទាំងពីរនៅធុងតែមួយ រំខានគ្នា)។ Module EC ស៊ីតែប៉ុន្មាន mA។
@@ -130,11 +129,11 @@ const char* STA_PASSWORD = "";
 // ៣. Calibration Sensor (ត្រូវ Calibrate ជាមួយ Sensor ពិត)
 // ==========================================================
 // ---- pH ----
-// Po របស់ Module ឆ្លងកាត់ Divider (R1=20k, R2=20k) មុនចូល GPIO35
+// Po របស់ Module ឆ្លងកាត់ Divider (R1=10k, R2=10k) មុនចូល GPIO35
 // ដូច្នេះ ESP32 ឃើញតែពាក់កណ្តាលនៃ Po។ កូដគុណ 2 វិញ ដើម្បីបានតង់ស្យុង Po ពិត។
-// បច្ចុប្បន្នមិនទាន់ដាក់ Divider -> 1.0។ បើដាក់ Divider 20k/20k សូមដាក់ 2.0
-// No divider fitted yet -> 1.0. Set 2.0 if a 20k/20k divider is added.
-const float PH_DIVIDER  = 1.0;
+// Divider 1:2 (10k + 10k) is fitted -> 2.0. Set 1.0 if the divider is removed.
+// ប្តូរតម្លៃនេះ ត្រូវតែត្រូវនឹង Hardware ពិត បើមិនដូច្នោះ pH នឹងខុសទាំងស្រុង។
+const float PH_DIVIDER  = 2.0;
 
 // Calibrate ជាមួយ Probe ពិត (Buffer pH 7 និង pH 4, 12V/LM2596, EC Probe ដកចេញ)
 //  Po ក្នុង Buffer pH 7.00 = 530-550 mV -> 540 mV
