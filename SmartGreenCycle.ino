@@ -161,13 +161,19 @@ const int  EC_PWR_ON_LEVEL = HIGH;    // កម្រិតដែលបើក EC
 // រង់ចាំ EC ស្ងប់ក្រោយបើក មុនអាន។ បើលេខ EC លោតខ្លាំង សាកបង្កើនដល់ 500
 const unsigned long EC_WARMUP_MS = 300;
 
-// VCC របស់ Module pH ភ្ជាប់ GPIO33៖ pH បើកជាធម្មតា ហើយបិទតែពេលអាន EC (EC ជាអ្នករំខាន)។
-// -1 = មិនប្រើ (pH ភ្ជាប់ 5V បើកជានិច្ច)។
-// pH module is powered from this pin: on normally, off only while EC is sampled.
-// !! Module pH ប្រើ 3.3V ឥឡូវ -> Po ប្រែ ត្រូវ Calibrate pH ម្តងទៀត (Buffer pH 7 និង pH 4)
-// !! pH module runs on 3.3V now: recalibrate PH_V_AT_7 / PH_V_PER_PH.
+// VCC របស់ Module pH ភ្ជាប់ GPIO33 (HIGH = បើក)។ -1 = មិនប្រើ។
+// PH_GATED = false (ណែនាំ)៖ pH បើកជានិច្ច មិនត្រូវបានបិទបើករៀងរាល់ 2s ទេ។
+//   Module pH ត្រូវការពេលច្រើនវិនាទីដើម្បីស្ងប់ក្រោយបើក ដូច្នេះការបិទបើកញឹកញាប់ធ្វើឱ្យ Po មិនស្ថិតស្ថេរ
+//   (លេខលោត ឬ pH:ERR)។ EC ត្រូវបានបិទពេលអាន pH រួចហើយ ដូច្នេះមិនចាំបាច់បិទ pH ទេ។
+// PH_GATED = true៖ បិទ pH ពេលអាន EC (ចាំបាច់តែបើបិទ EC មិនគ្រប់គ្រាន់)។
+// PH_GATED=false keeps the pH module powered continuously; power-cycling it every 2 s left Po
+// unsettled at read time.
+// !! ប្រសិនបើ Module pH ប្រើ 3.3V ពី GPIO33 -> ត្រូវ Calibrate pH ម្តងទៀត។
+//    ប្រសិនបើប្រើ 5V (ជើង 5V ជំនួស) -> Calibrate ដែលមានស្រាប់នៅប្រើបាន (Divider 2.0 ដូចដែល)។
 const int  PH_PWR_PIN      = 33;
 const int  PH_PWR_ON_LEVEL = HIGH;
+const bool PH_GATED        = false;
+const int  PH_BAD_MAX      = 3;   // Po ក្រៅជួរជាប់គ្នា 3 ដង (~6s) ទើបប្រកាស pH:ERR
 
 // ---- EC ----
 // Calibrate 2 ចំណុច ជាមួយទឹក Calibrate ក្នុងឈុត (mV អានពី WebApp, Probe ក្នុងទឹក 1 នាទី)
@@ -246,6 +252,7 @@ float phValue = 7.0, ecValue = 0.0;
 float phVolt = 0;               // តង់ស្យុង Po ពិត (បន្ទាប់ពីគុណ Divider)
 bool  phProbeOk = false;        // pH Module/Probe ដំណើរការ?
 bool  phInit = false, ecInit = false;
+int   phBad = PH_BAD_MAX;       // ចំនួនដងដែល Po ក្រៅជួរជាប់គ្នា (ចាប់ផ្តើម = មិនទាន់ដឹង)
 bool  ecLow = false;            // EC ទាបជាងកម្រិតដែល ESP32 វាស់បាន (ទឹកសាប ល្អ)
 int   levelPercent = 0;
 int   levelMm = 0;              // ចម្ងាយ Sensor -> ផ្ទៃទឹក (mm)
@@ -454,8 +461,11 @@ void readSensors() {
   // អាន pH មុន ពេល EC នៅបិទ (បើប្រើ EC_PWR_PIN) ដើម្បីកុំឱ្យ EC រំខាន
   phMv   = readMedian(PH_PIN, true);                 // mV ត្រង់ GPIO35
   phVolt = (phMv / 1000.0f) * PH_DIVIDER;            // តង់ស្យុង Po ពិត (V)
-  phProbeOk = (phVolt > PH_V_MIN_OK && phVolt < PH_V_MAX_OK);
-  if (phProbeOk) {
+  bool phInRange = (phVolt > PH_V_MIN_OK && phVolt < PH_V_MAX_OK);
+  if (phInRange) phBad = 0;
+  else if (phBad < PH_BAD_MAX) phBad++;           // អនុញ្ញាតឱ្យខកម្តងម្កាល មុនបង្ហាញ ERR
+  phProbeOk = phBad < PH_BAD_MAX;
+  if (phInRange) {
     float ph = 7.0f - ((phVolt - PH_V_AT_7) / PH_V_PER_PH);
     ph = constrain(ph, 0.0f, 14.0f);
     if (!phInit) { phValue = ph; phInit = true; }
@@ -463,11 +473,11 @@ void readSensors() {
   }
 
   // ---- EC (ធុងស្តុកទឹកច្រោះ) ----
-  phPower(false);                                 // បិទ pH ពេល EC ដំណើរការ
+  if (PH_GATED) phPower(false);                   // (ជម្រើស) បិទ pH ពេល EC ដំណើរការ
   if (EC_PWR_PIN >= 0) { ecPower(true); delay(EC_WARMUP_MS); }
   ecMv = readMedian(EC_PIN, true);
   ecPower(false);
-  phPower(true);                                  // បើក pH វិញ ឱ្យស្ងប់មុនអានលើកក្រោយ
+  if (PH_GATED) phPower(true);                    // បើក pH វិញ ឱ្យស្ងប់មុនអានលើកក្រោយ
   ecLow = ecMv < EC_MV_FLOOR;
   float ec = ecLow ? 0.0f : constrain(ecFromMv(ecMv), 0.0f, 20.0f);
   if (!ecInit) { ecValue = ec; ecInit = true; }
