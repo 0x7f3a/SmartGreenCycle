@@ -747,12 +747,12 @@ void applyControl(const String& body) {
   Settings n = cfg;
   bool all = true;
   String v;
-  auto F = [&](const char* k, float& d) { if (jsonFind(body, k, v)) d = v.toFloat(); else all = false; };
-  auto I = [&](const char* k, int& d)   { if (jsonFind(body, k, v)) d = v.toInt();   else all = false; };
-  F("phMin", n.phMin);   F("phMax", n.phMax);   F("ecMax", n.ecMax);
-  I("soilLow", n.soilLow); I("soilHigh", n.soilHigh);
-  F("tempHigh", n.tempHigh); I("humLow", n.humLow);
-  I("levelLow", n.levelLow); I("levelHigh", n.levelHigh);
+  auto getF = [&](const char* k, float& d) { if (jsonFind(body, k, v)) d = v.toFloat(); else all = false; };
+  auto getI = [&](const char* k, int& d)   { if (jsonFind(body, k, v)) d = v.toInt();   else all = false; };
+  getF("phMin", n.phMin);   getF("phMax", n.phMax);   getF("ecMax", n.ecMax);
+  getI("soilLow", n.soilLow); getI("soilHigh", n.soilHigh);
+  getF("tempHigh", n.tempHigh); getI("humLow", n.humLow);
+  getI("levelLow", n.levelLow); getI("levelHigh", n.levelHigh);
 
   if (all && !sameSettings(n, cfg)) {
     const char* err = validateSettings(n);
